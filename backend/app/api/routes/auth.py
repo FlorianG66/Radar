@@ -34,13 +34,15 @@ LOGIN_LIMIT = Depends(rate_limit(10, 60))
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 def register(payload: RegisterRequest, db: Db, _: None = LOGIN_LIMIT) -> TokenResponse:
+    from app.core import security
+
     try:
         user, _ = auth_service.register(db, payload)
     except auth_service.AuthError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return TokenResponse(
-        access_token=auth_service.create_access_token(user.id, user.organization_id),
-        refresh_token=auth_service.create_refresh_token(user.id),
+        access_token=security.create_access_token(user.id, user.organization_id),
+        refresh_token=security.create_refresh_token(user.id),
     )
 
 

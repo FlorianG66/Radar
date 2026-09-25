@@ -136,7 +136,7 @@ def _handle_success(db: Session, product: Product, job: ScrapeJob, outcome) -> s
     product.last_scrape_error = None
     product.last_checked_at = now
     product.next_check_at = now + _interval(product)
-    if raw.name and len(raw.name) >= 3 and product.name == _fallback_name(product):
+    if raw.name and len(raw.name) >= 3 and (not product.name or product.name == _fallback_name(product)):
         product.name = raw.name[:255]
 
     job.status = "success"

@@ -170,7 +170,7 @@ def handle_webhook(payload: bytes, signature: str | None) -> str:
     settings = get_settings()
     if not settings.STRIPE_WEBHOOK_SECRET or not signature:
         raise StripeServiceError("webhook signature manquante")
-    import stripe
+    stripe = _stripe()
 
     try:
         event = stripe.Webhook.construct_event(payload, signature, settings.STRIPE_WEBHOOK_SECRET)
@@ -202,11 +202,10 @@ def _route_event(event) -> str:
 
 
 def _org_by_stripe_id(db: Session, customer_id: str) -> Organization | None:
-    return (
-        db.query(Organization)
-        .filter(Organization.settings["stripe_customer_id"].astext == customer_id)
-        .first()
-    )
+    for org in db.query(Organization).all():
+        if org.settings.get("stripe_customer_id") == customer_id:
+            return org
+    return None
 
 
 def _org_by_metadata(db: Session, meta: dict) -> Organization | None:

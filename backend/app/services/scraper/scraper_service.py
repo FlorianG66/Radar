@@ -37,7 +37,7 @@ def host_of(url: str) -> str:
     host = urlparse(url).netloc.lower()
     if host.startswith("www."):
         host = host[4:]
-    return host
+    return host.split(":")[0]
 
 
 def is_domain_disabled(db: Session | None, host: str) -> bool:
@@ -97,8 +97,9 @@ def scrape_url(url: str, db: Session | None = None) -> ScrapeOutcome:
 
     # Domain extractor wins when it found something; generic backs up the gaps.
     if extractor is not None:
-        generic_raw.merge(raw)
-    raw = generic_raw
+        raw.merge(generic_raw)
+    else:
+        raw = generic_raw
 
     ok = raw.price is not None
     outcome = ScrapeOutcome(

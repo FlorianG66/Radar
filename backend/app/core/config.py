@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     SCRAPE_TIMEOUT_SECONDS: int = 30
     SCHEDULER_POLL_SECONDS: int = 30
 
+    # Local demo shop used by the search provider
+    DEMO_SHOP_URL: str = "http://localhost:8080"
+
     @property
     def stripe_enabled(self) -> bool:
         return bool(self.STRIPE_SECRET_KEY) and not self.STRIPE_SECRET_KEY.startswith("sk_test_replace")

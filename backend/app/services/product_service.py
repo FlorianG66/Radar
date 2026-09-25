@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.models import ChangeEvent, Competitor, Organization, Product, ProductSnapshot
 from app.schemas import ProductIn, ProductUpdate
 
-URL_RE = re.compile(r"^https?://[^\s]+\.[^\s]{2,}")
+URL_RE = re.compile(r"^https?://(?:localhost(?::\d+)?|127\.0\.0\.1(?::\d+)?|[^\s/$.?#].[^\s]*)", re.IGNORECASE)
 
 
 class ProductError(Exception):
@@ -26,7 +26,8 @@ def validate_product_url(url: str) -> str:
     if not URL_RE.match(url):
         raise ProductError("URL invalide : elle doit être une URL http(s) complète")
     host = urlparse(url).netloc
-    if not host or "." not in host:
+    h = host.split(":")[0].lower()
+    if not host or ("." not in h and h not in ("localhost", "127.0.0.1")):
         raise ProductError("URL invalide : domaine introuvable")
     return url
 
@@ -35,7 +36,7 @@ def _domain_from_url(url: str) -> str:
     host = urlparse(url).netloc.lower()
     if host.startswith("www."):
         host = host[4:]
-    return host
+    return host.split(":")[0]
 
 
 def get_competitor_or_create(db: Session, org: Organization, name: str | None, url: str) -> Competitor | None:
@@ -143,8 +144,11 @@ def delete_product(db: Session, org: Organization, product_id: int) -> None:
 
 
 def list_products(db: Session, org: Organization, search: str | None = None,
-                  competitor_id: int | None = None, limit: int = 200, offset: int = 0) -> list[Product]:
-    q = db.query(Product).filter(Product.organization_id == org.id, Product.is_active.is_(True))
+                  competitor_id: int | None = None, include_inactive: bool = False,
+                  limit: int = 200, offset: int = 0) -> list[Product]:
+    q = db.query(Product).filter(Product.organization_id == org.id)
+    if not include_inactive:
+        q = q.filter(Product.is_active.is_(True))
     if competitor_id:
         q = q.filter(Product.competitor_id == competitor_id)
     if search:

@@ -58,7 +58,15 @@ def should_suppress(product_id: int, event_type: str) -> bool:
 
 
 def alert_recipients(db: Session, org_id: int, event_type: str) -> list[User]:
-    users = db.query(User).filter(User.organization_id == org_id, User.is_active.is_(True)).all()
+    users = (
+        db.query(User)
+        .filter(
+            User.organization_id == org_id,
+            User.is_active.is_(True),
+            User.email_verified_at.isnot(None),
+        )
+        .all()
+    )
     out = []
     for user in users:
         prefs = get_prefs(db, user)

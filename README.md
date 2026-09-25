@@ -1,140 +1,123 @@
-# Radar
+# Radar 📡
 
-Surveillez les prix, la disponibilité et les promotions chez vos concurrents — et soyez alerté automatiquement à chaque changement.
-
-Radar est un SaaS de veille concurrentielle : il scrute périodiquement les fiches produits de vos concurrents, détecte les changements (baisse/hausse de prix, rupture de stock, début/fin de promotion…) et vous notifie en temps réel.
-
-## Fonctionnalités
-
-- **Surveillance de produits concurrents** : ajout par URL, scraping automatique à intervalle configurable (de 1 h à 24 h selon le plan).
-- **Détection de changements** : prix, disponibilité, promotions, et métadonnées produit (nom, SKU, EAN), avec historique immutable par snapshot.
-- **Alertes** : notifications par e-mail, filtrables par type d'événement (préférences par utilisateur).
-- **Dashboard** : produits suivis, événements récents, état des scrapes, monitorings du service (`/health`, `/docs`).
-- **Import** : ajout de produits en masse via URL ou CSV.
-- **Comparaison** : saisie optionnelle de votre propre prix pour comparer face aux concurrents.
-- **Billing Stripe** : 3 plans (Starter, Pro, Business) avec limites d'utilisation appliquées côté serveur, période d'essai de 14 jours.
-- **Multi-organisation** : comptes utilisateurs rattachés à une organisation.
-- **Kill-switch par domaine** : désactivation d'un domaine chez un concurrent en cas de requête abusive (admin).
+Surveillance de la concurrence : Radar suit les prix, la disponibilité et les
+promotions des produits de vos concurrents, détecte chaque variation et vous
+alerte automatiquement par e-mail.
 
 ## Architecture
 
 ```
-┌─────────────┐   ┌──────────────────┐   ┌──────────────┐
-│   frontend   │──▶│   backend (API)  │──▶│   Postgres   │
-│   (Next.js)  │   │    FastAPI       │   └──────────────┘
-└─────────────┘   └────────┬─────────┘   ┌──────────────┐
-                           │              │    Redis      │
-                     ┌─────▼─────┐        └──────┬───────┘
-                     │  RQ queue  │◀─────── RQ schedulers
-                     └─────┬─────┘        (scrape + notifications)
-                           │
-                    ┌──────▼──────┐
-                    │   Worker     │
-                    │  Playwright  │── scraping sites concurrents
-                    └─────────────┘
+frontend/   Next.js 16 (App Router, TypeScript, Tailwind v4)
+backend/    FastAPI + SQLAlchemy 2 + Alembic + RQ + Playwright
+docker-compose.yml
 ```
 
-- **API** : FastAPI, SQLAlchemy 2.0, Alembic pour les migrations, schémas Pydantic v2.
-- **Scraping** : pipeline `fetch → extracteur spécifique domaine → extracteur générique → normalisation`. Réseau + navigation via `httpx` et **Playwright** pour les sites nécessitant du JavaScript. Un échec de scraping est tracé comme `ScrapeJob` échoué et ne produit jamais de changement de prix.
-- **Pipeline de jobs** : Redis + **RQ**. Un worker traite les files `scrape` et `notifications` ; un scheduler planifie les prochaines vérifications.
-- **Détection de changements** : moteur pur (`detection.py`) qui compare le dernier snapshot au précédent et émet des événements typés (priorisé `high` / `medium` / `low`).
-- **Paiements** : Stripe (checkout + webhooks), plans définis côté serveur dans `app/core/plans.py`.
-
-## Structure du dépôt
-
 ```
-.
-├── backend/                  # API FastAPI + workers RQ
-│   ├── alembic/              # Migrations de base de données
-│   ├── app/
-│   │   ├── api/routes/       # health, auth, products, dashboard, imports, subscription, admin
-│   │   ├── core/             # config, db, redis, security, plans, logging
-│   │   ├── mail/             # envoi d'e-mails (backend console | smtp)
-│   │   ├── models.py         # Schéma SQLAlchemy complet
-│   │   ├── schemas.py        # Schémas Pydantic
-│   │   ├── services/         # auth, scraper/, detection, product, import, notifications, stripe, subscription
-│   │   └── workers/          # worker RQ, tasks, scheduler
-│   ├── scripts/              # scripts d'administration
-│   └── tests/
-├── frontend/                 # Application Next.js (en cours d'implémentation)
-└── .github/workflows/        # CI
+API                 (FastAPI — ne scrape jamais dans les handlers)
+  ↓
+Scheduler  ───────►  Redis queue (RQ)  ───────►  Workers  ──────►  DB / notifications
+  │
+  └─ maintenance : élagage de l'historique, nettoyage des jobs
 ```
 
-## Démarrage rapide (back-end)
+| Service  | Techno                                                    |
+|----------|-----------------------------------------------------------|
+| API      | FastAPI (`/docs` Swagger), SQLAlchemy, Alembic migrations |
+| Queue    | RQ + Redis                                                |
+| Scraper  | HTTP + BeautifulSoup + extracteurs dédiés, fallback Playwright |
+| Worker   | consomme la file, recalcule les détections (baisse/hausse, promo, stock) |
+| Notif.   | e-mail (SMTP), préférences par événement, anti-spam 12 h   |
+| Factu.   | Stripe (checkout + portail client), essai 14 jours        |
+| Frontend | Next.js 16 App Router, auth par JWT (access + refresh)    |
 
-### Prérequis
+## Démarrage local (sans Docker)
 
-- Python 3.11+
-- PostgreSQL
-- Redis
+Prérequis : Python 3.12, Node 20+.
 
-### Installation
+1. **Backend**
+
+   ```bash
+   cd backend
+   python -m venv .venv
+   .venv\Scripts\activate        # Windows (sinon : source .venv/bin/activate)
+   pip install -r requirements.txt
+   copy .env.example .env        # puis adaptez si besoin (SMTP console par défaut)
+   cd ..
+   ```
+
+   Lancement tout-en-un (API :8000 + scheduler + worker + boutique de démo :8080) :
+
+   ```bash
+   cd backend
+   python -m scripts.dev_local
+   ```
+
+   Le compte de démonstration est `demo@radar.app` / `demo12345!`.
+
+   Pour séparer les processus en production :
+
+   ```bash
+   alembic upgrade head
+   uvicorn app.main:app --host 0.0.0.0 --port 8000   # API
+   python -m app.workers.worker                       # worker RQ
+   python -m app.workers.scheduler                    # scheduler
+   ```
+
+2. **Frontend**
+
+   ```bash
+   cd frontend
+   npm install
+   copy .env.example .env.local     # NEXT_PUBLIC_API_URL=http://localhost:8000
+   npm run dev                      # http://localhost:3000
+   ```
+
+   Validation : `npm run lint` puis `npm run build`.
+
+## Démarrage avec Docker
+
+```bash
+cp .env.example backend/.env          # adaptez SECRET_KEY / Stripe si besoin
+docker compose up --build
+```
+
+Services exposés :
+
+- Frontend : http://localhost:3000
+- API + Swagger : http://localhost:8000/docs
+
+Postgres et Redis restent internes au réseau compose. Les migrations Alembic
+sont appliquées automatiquement au démarrage de l'API. Pour activer Stripe,
+renseignez `STRIPE_SECRET_KEY` (et les prix) dans votre environnement.
+
+## Tests
 
 ```bash
 cd backend
-python -m venv .venv
-# Windows : .venv\Scripts\activate
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
+.venv\Scripts\activate
+python -m pytest            # 113 tests : API, auth, produits, scraping, workers…
 ```
 
-Configurer `.env` (Postgres, Redis, `SECRET_KEY` — voir section Configuration).
+## Fonctionnalités
 
-### Base de données
+- **Dashboard** : produits suivis, changements détectés (7 j), statut du scraping.
+- **Produits** : ajout par URL (une ou plusieurs à la fois), détection auto du nom/prix/promo, historique, graphe d'évolution, comparaison avec votre propre prix de référence.
+- **Changements** : journal filtrable (baisse, hausse, retour au prix initial, rupture/retour en stock, promotions, échecs de scraping).
+- **Import/Export CSV** : `url,nom,concurrent,categorie,sku`.
+- **Notifications** : préférences par type d'événement, historique des envois.
+- **Facturation** : plans Starter (XX €) / Pro (XX €) / Business (XX €) / mois, essai 14 jours, portail Stripe.
+- **Administration** : stats globales, listes des organisations, activation/désactivation des extracteurs par domaine.
 
-```bash
-alembic upgrade head
-```
+## Extend the platform
 
-### Lancer l'API
-
-```bash
-uvicorn app.main:app --reload --port 8000
-```
-
-- Docs Swagger : http://localhost:8000/docs
-- Healthcheck : http://localhost:8000/health
-
-### Lancer le worker et le scheduler
-
-```bash
-python -m app.workers.worker        # traite les scrapes + notifications
-python -m app.workers.scheduler     # planifie les prochaines vérifications
-```
-
-### Playwright (scraping JavaScript)
-
-```bash
-playwright install chromium
-```
-
-### Tests
-
-```bash
-pytest
-```
-
-## Configuration (.env)
-
-Les variables principales : `DATABASE_URL`, `REDIS_URL`, `SECRET_KEY`, `SMTP_BACKEND` (`console` pour afficher les e-mails en développement, `smtp` en production), clés Stripe (`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_*`), et les limites de scraping (`MAX_CONCURRENT_SCRAPES`, `SCRAPE_TIMEOUT_SECONDS`). Voir `backend/.env.example` pour la liste complète.
-
-## Plans
-
-| Plan      | Prix / mois | Produits | Vérifications / jour | Historique | Fonctions                        |
-|-----------|-------------|----------|----------------------|------------|----------------------------------|
-| Starter   | 39 €        | 50       | 1                    | 30 jours   | Alertes e-mail                   |
-| Pro       | 79 €        | 250      | 4                    | 1 an       | + alertes avancées, export CSV   |
-| Business  | 149 €       | 1000     | 24                   | Illimité   | + API                            |
-
-## Roadmap
-
-- [x] Backend : API, scraping, détection, notifications e-mail, billing Stripe
-- [x] *Kill-switch* par domaine (désactivation admin en cas d'abus)
-- [ ] Frontend Next.js (auth, dashboard produits, fil d'événements, page tarifs)
-- [ ] Export CSV et API publique (plans Pro/Business)
-- [ ] Notifications push / Slack / Discord
+Les extracteurs par domaine vivent dans `backend/app/services/scraper/`
+(registry `domains.py` keyé par nom d'hôte, générique dans `extractor.py`).
+Les plans se configurent dans `backend/app/core/plans.py`.
 
 ## Licence
 
-Projet privé. Tous droits réservés.
+Code source publié pour consultation. **Tous droits réservés** — aucune licence
+ouverte n'est accordée : la reproduction, la modification et la réutilisation du
+code, en tout ou partie, sont interdites sans autorisation écrite préalable.
+
+Projet en cours de développement, non achevé.

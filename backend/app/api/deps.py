@@ -57,9 +57,17 @@ AdminUser = Annotated[User, Depends(require_admin)]
 
 
 def rate_limit(max_requests: int, window_seconds: int):
-    """Simple Redis fixed-window limiter. Distinct bucket per client+path."""
+    """Simple Redis fixed-window limiter. Distinct bucket per client+path.
+
+    Rate limiting is skipped in the test environment so automated suites can
+    exercise the endpoints without tripping on the shared "testclient" origin.
+    """
 
     def dependency(request: Request) -> None:
+        from app.core.config import get_settings
+
+        if get_settings().ENVIRONMENT == "test":
+            return
         if not redis_client:
             return
         key = f"rl:{request.client.host}:{request.url.path}"

@@ -58,7 +58,7 @@ def portal(db: Db, org: CurrentOrg) -> PortalResponse:
 
 
 @router.post("/webhook", include_in_schema=False)
-async def stripe_webhook(request: Request, signature: Annotated[str | None, Header()]) -> dict:
+async def stripe_webhook(request: Request, signature: Annotated[str | None, Header()] = None) -> dict:
     payload = await request.body()
     try:
         etype = stripe_service.handle_webhook(payload, signature)

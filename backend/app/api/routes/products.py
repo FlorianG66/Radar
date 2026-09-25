@@ -7,21 +7,24 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentOrg, CurrentUser, get_db
-from app.core.redis import scrape_queue
+from app.core.jobs import enqueue_scrape
 from app.models import Competitor, Product, ProductSnapshot
 from app.schemas import (
     CompetitorIn,
     CompetitorOut,
+    MerchantStatusOut,
+    Message,
     ProductIn,
     ProductOut,
+    ProductSearchOut,
+    ProductSearchResponse,
     ProductUpdate,
     ProductWithOwnPriceIn,
     SnapshotOut,
-    Message,
 )
 from app.services import product_service
+from app.services.scraper.search import MERCHANTS, search_products
 from app.services.subscription_service import history_retention_days
-from app.workers.tasks import process_scrape
 
 router = APIRouter(tags=["products"])
 Db = Annotated[Session, Depends(get_db)]
@@ -52,11 +55,14 @@ def list_products(
     org: CurrentOrg,
     search: str | None = None,
     competitor_id: int | None = None,
+    include_inactive: bool = False,
     limit: int = Query(200, le=500),
     offset: int = 0,
 ) -> list[ProductOut]:
     retention = history_retention_days(db, org)
-    products = product_service.list_products(db, org, search=search, competitor_id=competitor_id, limit=limit, offset=offset)
+    products = product_service.list_products(
+        db, org, search=search, competitor_id=competitor_id, include_inactive=include_inactive, limit=limit, offset=offset
+    )
     return [_to_out(db, p, retention) for p in products]
 
 
@@ -71,6 +77,32 @@ def create_product(payload: ProductIn, db: Db, org: CurrentOrg) -> ProductOut:
     except product_service.ProductError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return _to_out(db, product, history_retention_days(db, org))
+
+
+@router.get("/products/search", response_model=ProductSearchResponse)
+def search_by_name(
+    db: Db,
+    org: CurrentOrg,
+    q: str = Query(..., min_length=3, max_length=120),
+) -> ProductSearchResponse:
+    domains: list[tuple[str, str]] = list(MERCHANTS)
+    for comp in db.query(Competitor).filter(Competitor.organization_id == org.id).all():
+        if comp.domain and not any(d == comp.domain for _, d in MERCHANTS):
+            domains.append((comp.name, comp.domain))
+    outcome = search_products(q, domains)
+    tracked = {p.url for p in db.query(Product).filter(Product.organization_id == org.id).all()}
+    return ProductSearchResponse(
+        query=q,
+        merchants=[MerchantStatusOut(domain=m.domain, label=m.label, ok=m.ok, error=m.error) for m in outcome.merchants],
+        results=[
+            ProductSearchOut(
+                domain=r.domain, label=r.label, name=r.name, url=r.url,
+                price=r.price, currency=r.currency, availability=r.availability,
+                image_url=r.image_url, tracked=r.url in tracked,
+            )
+            for r in outcome.results
+        ],
+    )
 
 
 @router.get("/products/{product_id}", response_model=ProductOut)
@@ -108,7 +140,7 @@ def trigger_scrape(product_id: int, db: Db, org: CurrentOrg) -> Message:
         product = product_service.get_product(db, org, product_id)
     except product_service.NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    scrape_queue.enqueue(process_scrape, product.id, job_timeout=180, result_ttl=86400)
+    enqueue_scrape(product.id)
     return Message(message="vérification planifiée")
 
 

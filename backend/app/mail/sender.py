@@ -30,7 +30,7 @@ def _render_text(html: str) -> str:
 
 class ConsoleBackend:
     def send(self, msg: EmailMessage) -> None:
-        logger.info("📧 EMAIL to=%s subject=%s", msg.to, msg.subject, extra={"ctx": {"to": msg.to, "subject": msg.subject}})
+        logger.info("EMAIL to=%s subject=%s", msg.to, msg.subject, extra={"ctx": {"to": msg.to, "subject": msg.subject}})
 
 
 class SmtpBackend:

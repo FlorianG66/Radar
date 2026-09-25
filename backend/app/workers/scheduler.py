@@ -16,6 +16,7 @@ from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.core.jobs import enqueue_notification, enqueue_scrape
 from app.core.redis import redis_client
+from app.models import Product
 
 logger = logging.getLogger("radar.scheduler")
 
@@ -80,8 +81,8 @@ def requeue_pending_notifications() -> int:
                 continue
             if not redis_client.get(f"notif:queued:{notif.id}"):
                 redis_client.set(f"notif:queued:{notif.id}", "1", ex=3600)
-                notification_queue.enqueue(process_event_notifications, notif.event_id, job_timeout=120, result_ttl=86400)
-                count += 1
+                if enqueue_notification(notif.event_id):
+                    count += 1
         db.commit()
         return count
     finally:

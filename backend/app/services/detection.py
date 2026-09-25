@@ -80,22 +80,21 @@ def detect(
     prev_price = previous.price if previous else None
     cur_price = current.price
     if prev_price is not None and cur_price is not None and prev_price != cur_price:
-        if cur_price < prev_price:
+        # "return to an old price": current equals a price seen earlier (older than the last one)
+        back = False
+        if older_history:
+            back = any(o.price == cur_price for o in older_history if o.price is not None)
+        if back:
+            events.append(Evt("price_back", "medium",
+                              {"price": prev_price, "currency": previous.currency},
+                              {"price": cur_price, "currency": current.currency}))
+        elif cur_price < prev_price:
             events.append(Evt("price_drop", "high", {"price": prev_price, "currency": previous.currency},
                               {"price": cur_price, "currency": current.currency}))
         else:
-            # "return to an old price": current equals a price seen earlier (not the last one)
-            back = False
-            if older_history:
-                back = any(o.price == cur_price for o in older_history if o.price is not None)
-            if back:
-                events.append(Evt("price_back", "medium",
-                                  {"price": prev_price, "currency": previous.currency},
-                                  {"price": cur_price, "currency": current.currency}))
-            else:
-                events.append(Evt("price_rise", "medium",
-                                  {"price": prev_price, "currency": previous.currency},
-                                  {"price": cur_price, "currency": current.currency}))
+            events.append(Evt("price_rise", "medium",
+                              {"price": prev_price, "currency": previous.currency},
+                              {"price": cur_price, "currency": current.currency}))
     elif prev_price is None and cur_price is not None:
         # First ever priced snapshot — not an event.
         pass
@@ -124,6 +123,12 @@ def detect(
             events.append(Evt("promotion_change", "low",
                               {"old_price": prev_promo[1]},
                               {"old_price": cur_promo[1]}))
+    elif cur_promo[0] and prev_promo[0] and prev_price is not None and cur_price is not None and prev_price != cur_price:
+        # price moved while the promotion is still running (same reference price):
+        # the effective discount changed, e.g. -10% → -20%.
+        events.append(Evt("promotion_change", "low",
+                          {"old_price": cur_promo[1], "price": prev_price, "in_promotion": True},
+                          {"old_price": cur_promo[1], "price": cur_price, "in_promotion": True}))
 
     # ---------- product info ----------
     if previous and previous.product_name and current.product_name:

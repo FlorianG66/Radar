@@ -172,7 +172,7 @@ class GenericExtractor:
             name = node.get("name")
             if name:
                 product.name = str(name)[:255]
-        if not only_price and product.image:
+        if not only_price and product.image_url is None:
             img = node.get("image")
             if isinstance(img, list) and img:
                 img = img[0]
@@ -265,16 +265,23 @@ class GenericExtractor:
                 normalized = re.sub(r"\s*[|\-–]\s*(Amazon|FNAC|Darty|Media Markt|Boulanger|LDLC|Amazon\.fr|.*\.com).*$", "", title, flags=re.IGNORECASE)
                 product.name = normalized.strip()[:255] or None
         if product.price is None:
+            # Collect all plausible price candidates; the current price is
+            # (heuristically) the lowest one. Strike-through values are higher
+            # and are later captured as the "old" price by promotion heuristics.
+            candidates: list[tuple[float, str, str | None]] = []
+            seen: set[float] = set()
             for sel in PRICE_SELECTORS:
-                nodes = soup.select(sel)
-                for node in nodes:
+                for node in soup.select(sel):
                     price, currency = _price_value(node, currency_hint)
-                    if price is not None and 0 < price < 10_000_000:
-                        product.price, product.currency = price, currency
-                        product.original_price = node.get_text(" ", strip=True)[:64]
-                        break
-                if product.price is not None:
-                    break
+                    if price is not None and 0 < price < 10_000_000 and price not in seen:
+                        seen.add(price)
+                        candidates.append((price, node.get_text(" ", strip=True)[:64], currency))
+            if candidates:
+                price, text, currency = min(candidates, key=lambda c: c[0])
+                product.price = price
+                if currency:
+                    product.currency = currency
+                product.original_price = text
 
     # --- Availability & promotion ---
     def _map_availability(self, raw: str) -> str:
@@ -341,4 +348,4 @@ class DomainExtractor:
         host = urlparse(url).netloc.lower()
         if host.startswith("www."):
             host = host[4:]
-        return host
+        return host.split(":")[0]

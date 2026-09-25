@@ -187,6 +187,9 @@ class ProductOut(BaseModel):
     variation_abs: float | None = None
     competitor_id: int | None
     competitor_name: str | None = None
+    own_price: float | None = None
+    own_currency: str | None = None
+    own_name: str | None = None
     stats: dict = Field(default_factory=dict)
 
 
@@ -345,3 +348,29 @@ class HealthOut(BaseModel):
     database: str
     redis: str
     version: str = "0.1.0"
+
+
+# ---------- Product search ----------
+class ProductSearchOut(BaseModel):
+    domain: str
+    label: str
+    name: str
+    url: str
+    price: float | None = None
+    currency: str | None = None
+    availability: str | None = None
+    image_url: str | None = None
+    tracked: bool = False
+
+
+class MerchantStatusOut(BaseModel):
+    domain: str
+    label: str
+    ok: bool
+    error: str | None = None
+
+
+class ProductSearchResponse(BaseModel):
+    query: str
+    merchants: list[MerchantStatusOut]
+    results: list[ProductSearchOut]

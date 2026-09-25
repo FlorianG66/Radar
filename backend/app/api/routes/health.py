@@ -17,14 +17,13 @@ Db = Annotated[Session, Depends(get_db)]
 
 @router.get("/health", response_model=HealthOut)
 def health(db: Db) -> HealthOut:
-    db_ok = redis_ok = "ok"
+    db_ok = "ok"
+    redis_ok = "ok"
     try:
         db.execute(text("SELECT 1"))
     except Exception:
         db_ok = "error"
-    try:
-        redis_client.ping()
-    except Exception:
+    if not redis_client.ping():
         redis_ok = "error"
     return HealthOut(status="ok" if (db_ok == "ok" and redis_ok == "ok") else "degraded",
                      database=db_ok, redis=redis_ok)
